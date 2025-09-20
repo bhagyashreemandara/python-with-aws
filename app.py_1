@@ -1,0 +1,74 @@
+from flask import Flask, render_template, request, redirect, url_for, flash
+import boto3
+
+app = Flask(__name__)
+app.secret_key = "your_secret_key"  # required for flash messages
+
+PROFILE_NAME = "myprofile"  # AWS profile name
+
+
+def get_session(region):
+    """Create boto3 session using profile and region"""
+    return boto3.Session(profile_name=PROFILE_NAME, region_name=region)
+
+
+def list_vpcs(region):
+    """Fetch VPCs in given region"""
+    session = get_session(region)
+    ec2 = session.client("ec2")
+    response = ec2.describe_vpcs()
+    vpcs = []
+    for vpc in response.get("Vpcs", []):
+        tags = vpc.get("Tags", [])
+        name_tag = next((t["Value"] for t in tags if t["Key"] == "Name"), "N/A")
+        vpcs.append({
+            "VpcId": vpc["VpcId"],
+            "CidrBlock": vpc["CidrBlock"],
+            "Name": name_tag
+        })
+    return vpcs
+
+
+def create_vpc(region, cidr_block, tag_name):
+    """Create a new VPC"""
+    session = get_session(region)
+    ec2 = session.client("ec2")
+
+    # Create VPC
+    response = ec2.create_vpc(CidrBlock=cidr_block)
+    vpc_id = response["Vpc"]["VpcId"]
+
+    # Add tag
+    ec2.create_tags(
+        Resources=[vpc_id],
+        Tags=[{"Key": "Name", "Value": tag_name}]
+    )
+
+    return vpc_id
+
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    vpcs = []
+    region = None
+
+    if request.method == "POST":
+        region = request.form.get("region")
+        if "list_vpcs" in request.form:
+            vpcs = list_vpcs(region)
+        elif "create_vpc" in request.form:
+            cidr = request.form.get("cidr")
+            tag = request.form.get("tag")
+            try:
+                vpc_id = create_vpc(region, cidr, tag)
+                flash(f"✅ Created VPC {vpc_id} in {region}", "success")
+                vpcs = list_vpcs(region)
+            except Exception as e:
+                flash(f"❌ Error creating VPC: {str(e)}", "danger")
+
+    return render_template("index.html", vpcs=vpcs, region=region)
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
+

@@ -1,0 +1,124 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, session
+import boto3
+
+app = Flask(__name__)
+app.secret_key = "supersecretkey123"  # Required for session & flash messages
+
+# ---------------- Helpers ----------------
+def get_boto_session():
+    """Create boto3 session dynamically from stored credentials"""
+    return boto3.Session(
+        aws_access_key_id=session["aws_access_key"],
+        aws_secret_access_key=session["aws_secret_key"],
+        region_name=session["region"]
+    )
+
+def get_ec2_client():
+    """Return EC2 client for current session"""
+    boto_sess = get_boto_session()
+    return boto_sess.client("ec2")
+
+# ---------------- VPC Operations ----------------
+def list_vpcs():
+    ec2 = get_ec2_client()
+    response = ec2.describe_vpcs()
+    vpcs = []
+    for vpc in response.get("Vpcs", []):
+        tags = vpc.get("Tags", [])
+        name_tag = next((t["Value"] for t in tags if t["Key"] == "Name"), "N/A")
+        vpcs.append({
+            "VpcId": vpc["VpcId"],
+            "CidrBlock": vpc["CidrBlock"],
+            "Name": name_tag
+        })
+    return vpcs
+
+def create_vpc(cidr_block, tag_name):
+    ec2 = get_ec2_client()
+    response = ec2.create_vpc(CidrBlock=cidr_block)
+    vpc_id = response["Vpc"]["VpcId"]
+    ec2.create_tags(Resources=[vpc_id], Tags=[{"Key": "Name", "Value": tag_name}])
+    return vpc_id
+
+def delete_vpc(vpc_id):
+    ec2 = get_ec2_client()
+    ec2.delete_vpc(VpcId=vpc_id)
+    return vpc_id
+
+def create_subnet(vpc_id, cidr_block):
+    ec2 = get_ec2_client()
+    response = ec2.create_subnet(VpcId=vpc_id, CidrBlock=cidr_block)
+    return response["Subnet"]["SubnetId"]
+
+# ---------------- Routes ----------------
+@app.route("/", methods=["GET", "POST"])
+def login():
+    """AWS login page"""
+    if request.method == "POST":
+        access_key = request.form.get("access_key")
+        secret_key = request.form.get("secret_key")
+        region = request.form.get("region")
+        try:
+            # Store only credentials & region in session
+            session["aws_access_key"] = access_key
+            session["aws_secret_key"] = secret_key
+            session["region"] = region
+            flash("✅ Logged in successfully!", "success")
+            return redirect(url_for("dashboard"))
+        except Exception as e:
+            flash(f"❌ Login failed: {str(e)}", "danger")
+    return render_template("login.html")
+
+@app.route("/dashboard", methods=["GET", "POST"])
+def dashboard():
+    if "aws_access_key" not in session:
+        return redirect(url_for("login"))
+
+    region = session["region"]
+    vpcs = list_vpcs()
+
+    if request.method == "POST":
+        # ---------------- Create VPC ----------------
+        if "create_vpc" in request.form:
+            cidr = request.form.get("cidr")
+            tag = request.form.get("tag")
+            try:
+                vpc_id = create_vpc(cidr, tag)
+                flash(f"✅ Created VPC {vpc_id}", "success")
+            except Exception as e:
+                flash(f"❌ Error creating VPC: {str(e)}", "danger")
+
+        # ---------------- Delete VPC ----------------
+        elif "delete_vpc" in request.form:
+            vpc_id = request.form.get("vpc_id")
+            try:
+                delete_vpc(vpc_id)
+                flash(f"🗑️ Deleted VPC {vpc_id}", "success")
+            except Exception as e:
+                flash(f"❌ Error deleting VPC: {str(e)}", "danger")
+
+        # ---------------- Create Subnet ----------------
+        elif "create_subnet" in request.form:
+            vpc_id = request.form.get("vpc_id")
+            subnet_cidr = request.form.get("subnet_cidr")
+            try:
+                subnet_id = create_subnet(vpc_id, subnet_cidr)
+                flash(f"✅ Created Subnet {subnet_id} in VPC {vpc_id}", "success")
+            except Exception as e:
+                flash(f"❌ Error creating subnet: {str(e)}", "danger")
+
+        # Refresh VPC list after action
+        vpcs = list_vpcs()
+
+    return render_template("index.html", vpcs=vpcs, region=region)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash("Logged out successfully!", "success")
+    return redirect(url_for("login"))
+
+# ---------------- Run App ----------------
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
+

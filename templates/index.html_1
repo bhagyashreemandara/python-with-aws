@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AWS VPC Manager</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #2c3e50; }
+        form { margin-bottom: 20px; }
+        table { border-collapse: collapse; width: 60%; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background: #f4f4f4; }
+        .msg { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .danger { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>AWS VPC Manager</h1>
+
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="msg {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- Form to list VPCs -->
+    <form method="post">
+        <label for="region">Region:</label>
+        <input type="text" name="region" placeholder="ap-south-1" required>
+        <button type="submit" name="list_vpcs">List VPCs</button>
+    </form>
+
+    <!-- Form to create VPC -->
+    <form method="post">
+        <input type="hidden" name="region" value="{{ region if region else '' }}">
+        <label for="cidr">CIDR Block:</label>
+        <input type="text" name="cidr" placeholder="10.0.0.0/16" required>
+        <label for="tag">Tag Name:</label>
+        <input type="text" name="tag" placeholder="MyVPC" required>
+        <button type="submit" name="create_vpc">Create VPC</button>
+    </form>
+
+    <!-- VPC List -->
+    {% if vpcs %}
+        <h2>VPCs in region {{ region }}</h2>
+        <table>
+            <tr><th>VPC ID</th><th>CIDR Block</th><th>Name</th></tr>
+            {% for vpc in vpcs %}
+            <tr>
+                <td>{{ vpc.VpcId }}</td>
+                <td>{{ vpc.CidrBlock }}</td>
+                <td>{{ vpc.Name }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+</body>
+</html>
+
